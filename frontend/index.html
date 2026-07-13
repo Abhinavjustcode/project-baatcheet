@@ -3,137 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Omegle Clone</title>
+    <title>Baatcheet - Live Video Chat</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a1a; color: white; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; }
-        h1 { margin-bottom: 10px; color: #ff5722; }
-        #status { margin-bottom: 20px; font-size: 18px; color: #aaa; font-weight: bold; }
-        
-        .video-container { display: flex; gap: 20px; margin-bottom: 20px; width: 100%; max-width: 900px; justify-content: center; flex-wrap: wrap; }
-        .video-box { position: relative; background: #000; border-radius: 8px; overflow: hidden; border: 2px solid #333; width: 100%; max-width: 400px; aspect-ratio: 4/3; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .label { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 14px; }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #0f0f0f; color: white; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
-        .controls { display: flex; gap: 15px; }
-        button { padding: 12px 30px; font-size: 16px; cursor: pointer; border: none; border-radius: 25px; font-weight: bold; transition: 0.2s; }
-        #startBtn { background: #4CAF50; color: white; }
-        #startBtn:hover { background: #45a049; }
-        #skipBtn { background: #f44336; color: white; }
-        #skipBtn:hover { background: #da190b; }
-        button:disabled { background: #555; cursor: not-allowed; color: #888; }
+        /* Video Area */
+        .video-wrapper { display: flex; flex: 1; padding: 15px; gap: 15px; }
+        .video-box { flex: 1; background: #1a1a1a; border-radius: 20px; position: relative; overflow: hidden; border: 2px solid #333; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .label { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 10px; font-size: 12px; }
+
+        /* Controls Area */
+        .controls { height: 90px; display: flex; justify-content: center; align-items: center; gap: 20px; background: #0f0f0f; border-top: 1px solid #333; }
+        button { padding: 12px 30px; font-size: 16px; border-radius: 50px; border: none; cursor: pointer; font-weight: 600; transition: 0.3s; background: #333; color: white; }
+        button:hover { background: #444; }
+        #skipBtn { background: #ff4757; }
+        #skipBtn:hover { background: #ff6b81; }
+        
+        #status { text-align: center; font-size: 14px; color: #888; padding-bottom: 5px; }
     </style>
 </head>
 <body>
 
-    <h1>Stranger Chat</h1>
-    <div id="status">Click Start to connect with a stranger</div>
-
-    <div class="video-container">
+    <div class="video-wrapper">
         <div class="video-box">
+            <div class="label">YOU</div>
             <video id="localVideo" autoplay muted playsinline></video>
-            <div class="label">You</div>
         </div>
         <div class="video-box">
+            <div class="label">STRANGER</div>
             <video id="remoteVideo" autoplay playsinline></video>
-            <div class="label">Stranger</div>
         </div>
     </div>
 
+    <div id="status">Connecting to server...</div>
+
     <div class="controls">
-        <button id="startBtn">Start</button>
-        <button id="skipBtn" disabled>Skip / Next</button>
+        <button onclick="toggleTrack('video')">Cam Toggle</button>
+        <button onclick="toggleTrack('audio')">Mic Toggle</button>
+        <button id="skipBtn">SKIP</button>
     </div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const localVideo = document.getElementById('localVideo');
-        const remoteVideo = document.getElementById('remoteVideo');
-        const startBtn = document.getElementById('startBtn');
-        const skipBtn = document.getElementById('skipBtn');
-        const statusEl = document.getElementById('status');
+        // Yahan apna Render wala link sahi se daalna
+        const socket = io("https://project-baatcheet.onrender.com");
+        let localStream, pc, currentRoom;
 
-        let socket;
-        let localStream;
-        let peerConnection;
-        let currentRoomId = null;
-
-        const configuration = {
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        };
-
-        async function initCamera() {
+        async function init() {
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = localStream;
+                document.getElementById('localVideo').srcObject = localStream;
+                document.getElementById('status').innerText = "Searching for stranger...";
+                socket.emit('request-room');
             } catch (err) {
-                alert("Please allow camera and microphone access.");
+                alert("Camera/Mic access deni padegi!");
             }
         }
-        initCamera();
 
-        startBtn.onclick = () => {
-            if (!localStream) return alert("Camera not ready!");
-            startBtn.disabled = true;
-            skipBtn.disabled = false;
+        socket.on('room-created', async ({ roomId, offer }) => {
+            currentRoom = roomId;
+            pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
             
-            socket = io("https://project-baatcheet.onrender.com"); 
-            setupSocketListeners();
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+            
+            pc.onicecandidate = e => { if (e.candidate) socket.emit('ice-candidate', { roomId, candidate: e.candidate }); };
+            pc.ontrack = e => { document.getElementById('remoteVideo').srcObject = e.streams[0]; document.getElementById('status').innerText = "Connected!"; };
+
+            if (offer) {
+                const sdp = await pc.createOffer();
+                await pc.setLocalDescription(sdp);
+                socket.emit('offer', { roomId, sdp });
+            }
+        });
+
+        socket.on('offer', async (sdp) => {
+            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit('answer', { roomId: currentRoom, sdp: answer });
+        });
+
+        socket.on('answer', (sdp) => pc.setRemoteDescription(new RTCSessionDescription(sdp)));
+        socket.on('ice-candidate', (c) => pc.addIceCandidate(new RTCIceCandidate(c)));
+
+        document.getElementById('skipBtn').onclick = () => {
+            if(pc) pc.close();
+            document.getElementById('remoteVideo').srcObject = null;
+            document.getElementById('status').innerText = "Searching for stranger...";
+            socket.emit('request-room');
         };
 
-        skipBtn.onclick = () => {
-            if (peerConnection) peerConnection.close();
-            remoteVideo.srcObject = null;
-            socket.disconnect();
-            
-            socket = io("https://project-baatcheet.onrender.com");
-            setupSocketListeners();
-        };
-
-        function setupSocketListeners() {
-            socket.on("lobby", () => {
-                statusEl.innerText = "Looking for a stranger...";
-                remoteVideo.srcObject = null;
-            });
-
-            socket.on("send-offer", async ({ roomId }) => {
-                currentRoomId = roomId;
-                createPeerConnection();
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                socket.emit("offer", { sdp: offer, roomId });
-            });
-
-            socket.on("offer", async ({ sdp, roomId }) => {
-                currentRoomId = roomId;
-                createPeerConnection();
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                socket.emit("answer", { sdp: answer, roomId });
-            });
-
-            socket.on("answer", async ({ sdp }) => {
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
-            });
-
-            socket.on("add-ice-candidate", async ({ candidate }) => {
-                if (peerConnection && candidate) {
-                    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-                }
-            });
+        function toggleTrack(type) {
+            localStream.getTracks().forEach(t => { if(t.kind === type) t.enabled = !t.enabled; });
         }
 
-        function createPeerConnection() {
-            peerConnection = new RTCPeerConnection(configuration);
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-            peerConnection.ontrack = (event) => {
-                remoteVideo.srcObject = event.streams[0];
-                statusEl.innerText = "Connected! Say Hi!";
-            };
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) socket.emit("add-ice-candidate", { candidate: event.candidate, roomId: currentRoomId });
-            };
-        }
+        init();
     </script>
 </body>
 </html>

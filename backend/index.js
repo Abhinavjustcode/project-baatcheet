@@ -1,35 +1,33 @@
 const express = require('express');
-const http = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors'); // CORS ko require kiya
-const UserManager = require('./UserManager');
+const http = require('http');
+const cors = require('cors');
 
 const app = express();
-app.use(cors()); // Express server ko sabhi connections allow karne ka permission diya
-
+app.use(cors());
 const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
-// Allow the frontend to connect
-const io = new Server(server, {
-  cors: {
-    origin: "*", 
-    methods: ["GET", "POST"]
-  }
-});
-
-const userManager = new UserManager();
+let queue = [];
 
 io.on('connection', (socket) => {
-  console.log('A user connected:', socket.id);
-  
-  userManager.addUser("randomName", socket);
+    socket.on('request-room', () => {
+        if (queue.length > 0) {
+            let peer = queue.pop();
+            let roomId = socket.id + "#" + peer.id;
+            socket.join(roomId);
+            peer.join(roomId);
+            socket.emit('room-created', { roomId, offer: true });
+            peer.emit('room-created', { roomId, offer: false });
+        } else {
+            queue.push(socket);
+        }
+    });
 
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-    userManager.removeUser(socket.id);
-  });
+    socket.on('offer', (data) => socket.to(data.roomId).emit('offer', data.sdp));
+    socket.on('answer', (data) => socket.to(data.roomId).emit('answer', data.sdp));
+    socket.on('ice-candidate', (data) => socket.to(data.roomId).emit('ice-candidate', data.candidate));
+    socket.on('disconnect', () => { queue = queue.filter(s => s.id !== socket.id); });
 });
 
-server.listen(3000, () => {
-  console.log('Signaling server running on port 3000');
-});
+server.listen(process.env.PORT || 3000);
