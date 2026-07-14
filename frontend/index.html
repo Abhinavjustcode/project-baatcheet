@@ -3,103 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baatcheet - Live Video Chat</title>
+    <title>Baatcheet | Production Grade</title>
     <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; background: #0f0f0f; color: white; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        /* BEM CSS Methodology */
+        :root { --dark: #000; --accent: #ff0055; }
+        body { margin: 0; background: var(--dark); color: white; font-family: sans-serif; overflow: hidden; }
 
-        /* Video Area */
-        .video-wrapper { display: flex; flex: 1; padding: 15px; gap: 15px; }
-        .video-box { flex: 1; background: #1a1a1a; border-radius: 20px; position: relative; overflow: hidden; border: 2px solid #333; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .label { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 10px; font-size: 12px; }
+        .app__container { display: grid; grid-template-columns: 1fr 1fr; height: 100vh; gap: 0; }
+        .video__box { position: relative; overflow: hidden; background: #111; }
+        .video__element { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 
-        /* Controls Area */
-        .controls { height: 90px; display: flex; justify-content: center; align-items: center; gap: 20px; background: #0f0f0f; border-top: 1px solid #333; }
-        button { padding: 12px 30px; font-size: 16px; border-radius: 50px; border: none; cursor: pointer; font-weight: 600; transition: 0.3s; background: #333; color: white; }
-        button:hover { background: #444; }
-        #skipBtn { background: #ff4757; }
-        #skipBtn:hover { background: #ff6b81; }
-        
-        #status { text-align: center; font-size: 14px; color: #888; padding-bottom: 5px; }
+        .controls__bar { 
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 15px; z-index: 10;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+            padding: 15px 30px; border-radius: 50px;
+        }
+        .btn { padding: 12px 25px; border-radius: 30px; border: none; cursor: pointer; font-weight: bold; }
+        .btn--skip { background: var(--accent); color: white; }
     </style>
 </head>
 <body>
 
-    <div class="video-wrapper">
-        <div class="video-box">
-            <div class="label">YOU</div>
-            <video id="localVideo" autoplay muted playsinline></video>
-        </div>
-        <div class="video-box">
-            <div class="label">STRANGER</div>
-            <video id="remoteVideo" autoplay playsinline></video>
-        </div>
-    </div>
+    <main class="app__container">
+        <div class="video__box"><video id="localVideo" class="video__element" autoplay muted playsinline></video></div>
+        <div class="video__box"><video id="remoteVideo" class="video__element" autoplay playsinline></video></div>
+    </main>
 
-    <div id="status">Connecting to server...</div>
-
-    <div class="controls">
-        <button onclick="toggleTrack('video')">Cam Toggle</button>
-        <button onclick="toggleTrack('audio')">Mic Toggle</button>
-        <button id="skipBtn">SKIP</button>
+    <div class="controls__bar">
+        <button class="btn" onclick="app.toggleMedia('video')">Cam</button>
+        <button class="btn" onclick="app.toggleMedia('audio')">Mic</button>
+        <button class="btn btn--skip" onclick="window.location.reload()">SKIP</button>
     </div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        // Yahan apna Render wala link sahi se daalna
-        const socket = io("https://project-baatcheet.onrender.com");
-        let localStream, pc, currentRoom;
+        class BaatcheetApp {
+            constructor() {
+                this.pc = null;
+                this.localStream = null;
+                this.socket = io("https://project-baatcheet.onrender.com");
+                this.init();
+            }
 
-        async function init() {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                document.getElementById('localVideo').srcObject = localStream;
-                document.getElementById('status').innerText = "Searching for stranger...";
-                socket.emit('request-room');
-            } catch (err) {
-                alert("Camera/Mic access deni padegi!");
+            async init() {
+                this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = this.localStream;
+                this.setupSocket();
+            }
+
+            setupSocket() {
+                this.socket.emit('request-room');
+                this.socket.on('room-created', async ({ roomId, offer }) => {
+                    this.pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+                    this.localStream.getTracks().forEach(t => this.pc.addTrack(t, this.localStream));
+                    this.pc.onicecandidate = (e) => e.candidate && this.socket.emit('ice-candidate', { roomId, candidate: e.candidate });
+                    this.pc.ontrack = (e) => document.getElementById('remoteVideo').srcObject = e.streams[0];
+                    
+                    if (offer) {
+                        const sdp = await this.pc.createOffer();
+                        await this.pc.setLocalDescription(sdp);
+                        this.socket.emit('offer', { roomId, sdp });
+                    }
+                });
+                
+                this.socket.on('offer', async (sdp) => {
+                    await this.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+                    const ans = await this.pc.createAnswer();
+                    await this.pc.setLocalDescription(ans);
+                    this.socket.emit('answer', { roomId: 'room', sdp: ans });
+                });
+
+                this.socket.on('answer', (sdp) => this.pc.setRemoteDescription(new RTCSessionDescription(sdp)));
+                this.socket.on('ice-candidate', (c) => this.pc.addIceCandidate(new RTCIceCandidate(c)));
+            }
+
+            toggleMedia(kind) {
+                this.localStream.getTracks().forEach(t => { if(t.kind === kind) t.enabled = !t.enabled; });
             }
         }
 
-        socket.on('room-created', async ({ roomId, offer }) => {
-            currentRoom = roomId;
-            pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-            
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-            
-            pc.onicecandidate = e => { if (e.candidate) socket.emit('ice-candidate', { roomId, candidate: e.candidate }); };
-            pc.ontrack = e => { document.getElementById('remoteVideo').srcObject = e.streams[0]; document.getElementById('status').innerText = "Connected!"; };
-
-            if (offer) {
-                const sdp = await pc.createOffer();
-                await pc.setLocalDescription(sdp);
-                socket.emit('offer', { roomId, sdp });
-            }
-        });
-
-        socket.on('offer', async (sdp) => {
-            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socket.emit('answer', { roomId: currentRoom, sdp: answer });
-        });
-
-        socket.on('answer', (sdp) => pc.setRemoteDescription(new RTCSessionDescription(sdp)));
-        socket.on('ice-candidate', (c) => pc.addIceCandidate(new RTCIceCandidate(c)));
-
-        document.getElementById('skipBtn').onclick = () => {
-            if(pc) pc.close();
-            document.getElementById('remoteVideo').srcObject = null;
-            document.getElementById('status').innerText = "Searching for stranger...";
-            socket.emit('request-room');
-        };
-
-        function toggleTrack(type) {
-            localStream.getTracks().forEach(t => { if(t.kind === type) t.enabled = !t.enabled; });
-        }
-
-        init();
+        const app = new BaatcheetApp();
     </script>
 </body>
 </html>
