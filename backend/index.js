@@ -28,8 +28,12 @@ io.on('connection', (socket) => {
     socket.on('answer', (data) => socket.to(data.roomId).emit('answer', data));
     socket.on('ice-candidate', (data) => socket.to(data.roomId).emit('ice-candidate', data.candidate));
     socket.on('meme', (data) => socket.to(data.roomId).emit('meme', data));
+    socket.on('chat', (data) => socket.to(data.roomId).emit('chat', data.message));
     socket.on('skip', (roomId) => socket.to(roomId).emit('skip'));
-    socket.on('disconnect', () => { queue = queue.filter(s => s.id !== socket.id); });
+    
+    socket.on('disconnect', () => {
+        queue = queue.filter(s => s.id !== socket.id);
+    });
 });
 
-server.listen(process.env.PORT || 3000);
+server.listen(process.env.PORT || 3000, () => console.log("Server Active"));
