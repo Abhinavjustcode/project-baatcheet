@@ -24,9 +24,10 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('offer', (data) => socket.to(data.roomId).emit('offer', data.sdp));
-    socket.on('answer', (data) => socket.to(data.roomId).emit('answer', data.sdp));
+    socket.on('offer', (data) => socket.to(data.roomId).emit('offer', { roomId: data.roomId, sdp: data.sdp }));
+    socket.on('answer', (data) => socket.to(data.roomId).emit('answer', { roomId: data.roomId, sdp: data.sdp }));
     socket.on('ice-candidate', (data) => socket.to(data.roomId).emit('ice-candidate', data.candidate));
+    socket.on('meme', (data) => socket.to(data.roomId).emit('meme', data));
     socket.on('disconnect', () => { queue = queue.filter(s => s.id !== socket.id); });
 });
 
