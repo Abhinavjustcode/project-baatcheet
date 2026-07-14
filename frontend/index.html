@@ -2,14 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baatcheet</title>
+    <title>Baatcheet | Pro</title>
     <style>
-        body { margin: 0; background: #000; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
-        .app__container { display: flex; width: 100%; height: 100vh; }
+        body { margin: 0; background: #000; overflow: hidden; }
+        .app__container { display: flex; height: 100vh; width: 100vw; }
         .video__box { flex: 1; position: relative; border: 1px solid #333; }
         .video__element { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        #skipBtn { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 1000; padding: 15px 30px; background: #ff0055; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; }
+        .controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 1000; }
+        .btn { padding: 15px 30px; background: #ff0055; color: white; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; font-size: 18px; }
+        #memeVideo { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000; object-fit: cover; }
     </style>
 </head>
 <body>
@@ -17,39 +18,47 @@
         <div class="video__box"><video id="localVideo" class="video__element" autoplay muted playsinline></video></div>
         <div class="video__box"><video id="remoteVideo" class="video__element" autoplay playsinline></video></div>
     </div>
-    <button id="skipBtn">SKIP</button>
+    
+    <div class="controls">
+        <button class="btn" onclick="skip()">SKIP ✋🛑</button>
+    </div>
+
+    <video id="memeVideo" muted playsinline>
+        <source src="https://raw.githubusercontent.com/Abhinavjustcode/project-baatcheet/main/ruko-zara-sabar-karo.mp4" type="video/mp4">
+    </video>
+
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const socket = io("https://project-baatcheet-backend.onrender.com"); // Yahan apna backend URL daal
+        const socket = io("https://project-baatcheet-backend.onrender.com");
         let localStream, pc, roomId;
 
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
-            localStream = stream;
-            document.getElementById('localVideo').srcObject = stream;
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(s => {
+            localStream = s;
+            document.getElementById('localVideo').srcObject = s;
             socket.emit('request-room');
         });
 
-        socket.on('room-created', (data) => {
-            roomId = data.roomId;
+        function skip() {
+            socket.emit('skip', roomId);
+            const v = document.getElementById('memeVideo');
+            v.style.display = 'block';
+            v.play();
+            v.onended = () => window.location.reload();
+        }
+
+        socket.on('room-created', (d) => {
+            roomId = d.roomId;
             pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-            
+            localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
             pc.ontrack = (e) => document.getElementById('remoteVideo').srcObject = e.streams[0];
             pc.onicecandidate = (e) => e.candidate && socket.emit('ice-candidate', { roomId, candidate: e.candidate });
-
-            if (data.offer) {
-                pc.createOffer().then(sdp => { pc.setLocalDescription(sdp); socket.emit('offer', { roomId, sdp }); });
-            }
+            if(d.offer) pc.createOffer().then(s => { pc.setLocalDescription(s); socket.emit('offer', { roomId, sdp: s }); });
         });
 
-        socket.on('offer', (data) => {
-            pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            pc.createAnswer().then(ans => { pc.setLocalDescription(ans); socket.emit('answer', { roomId, sdp: ans }); });
-        });
-
-        socket.on('answer', (data) => pc.setRemoteDescription(new RTCSessionDescription(data.sdp)));
+        socket.on('offer', (d) => { pc.setRemoteDescription(new RTCSessionDescription(d.sdp)); pc.createAnswer().then(a => { pc.setLocalDescription(a); socket.emit('answer', { roomId, sdp: a }); }); });
+        socket.on('answer', (d) => pc.setRemoteDescription(new RTCSessionDescription(d.sdp)));
         socket.on('ice-candidate', (c) => pc.addIceCandidate(new RTCIceCandidate(c)));
-        document.getElementById('skipBtn').onclick = () => window.location.reload();
+        socket.on('skip', () => window.location.reload());
     </script>
 </body>
 </html>
