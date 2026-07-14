@@ -4,7 +4,8 @@ const http = require('http');
 const cors = require('cors');
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: "*", methods: ["GET", "POST"] }));
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
@@ -31,9 +32,8 @@ io.on('connection', (socket) => {
     socket.on('chat', (data) => socket.to(data.roomId).emit('chat', data.message));
     socket.on('skip', (roomId) => socket.to(roomId).emit('skip'));
     
-    socket.on('disconnect', () => {
-        queue = queue.filter(s => s.id !== socket.id);
-    });
+    socket.on('disconnect', () => { queue = queue.filter(s => s.id !== socket.id); });
 });
 
-server.listen(process.env.PORT || 3000, () => console.log("Server Active"));
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => console.log(`Server Active on ${PORT}`));

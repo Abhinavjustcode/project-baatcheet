@@ -8,12 +8,9 @@
         .app__container { display: grid; grid-template-columns: 1fr 1fr; height: 100vh; }
         .video__box { position: relative; background: #111; display: flex; align-items: center; justify-content: center; }
         .video__element { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        .controls__bar { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 100; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); padding: 10px; border-radius: 50px; }
-        .btn { padding: 8px 15px; border-radius: 20px; border: none; cursor: pointer; background: #222; color: white; }
+        .controls__bar { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 100; background: rgba(0,0,0,0.6); padding: 10px 20px; border-radius: 50px; }
+        .btn { padding: 10px 15px; border-radius: 20px; border: none; cursor: pointer; background: #222; color: white; }
         .btn--skip { background: #ff0055; font-weight: bold; }
-        .meme-popup { position: absolute; width: 120px; z-index: 500; pointer-events: none; animation: pop 1.5s ease-out forwards; }
-        @keyframes pop { 0% { transform: scale(0); opacity: 0; } 50% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(0.5); opacity: 0; } }
-        #chatBox { position: fixed; top: 20px; right: 20px; width: 200px; height: 200px; background: rgba(0,0,0,0.5); padding: 10px; z-index: 1000; }
     </style>
 </head>
 <body>
@@ -21,8 +18,13 @@
         <div class="video__box"><video id="localVideo" class="video__element" autoplay muted playsinline></video></div>
         <div class="video__box"><video id="remoteVideo" class="video__element" autoplay playsinline></video></div>
     </main>
+    
     <div class="controls__bar" id="controls"></div>
-    <div id="chatBox"><div id="messages"></div><input id="msgInput" placeholder="Chat..."></div>
+
+    <!-- Meme Video Overlay -->
+    <video id="memeVideo" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:2000; object-fit:cover;">
+        <source src="https://raw.githubusercontent.com/Abhinavjustcode/project-baatcheet/main/ruko-zara-sabar-karo.mp4" type="video/mp4">
+    </video>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
@@ -35,22 +37,24 @@
             async init() {
                 this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 document.getElementById('localVideo').srcObject = this.localStream;
-                this.setupSocket();
-                ['😂', '🤯', '❤️', '🔥', '🤣'].forEach(e => {
-                    const b = document.createElement('button'); b.className = 'btn'; b.innerText = e;
-                    b.onclick = () => this.sendMeme(e);
-                    document.getElementById('controls').appendChild(b);
-                });
+                this.setupControls();
+                this.socket.emit('request-room');
+                this.setupSocketEvents();
+            }
+            setupControls() {
                 const s = document.createElement('button'); s.className = 'btn btn--skip'; s.innerText = 'SKIP';
                 s.onclick = () => this.skip();
                 document.getElementById('controls').appendChild(s);
             }
-            setupSocket() {
-                this.socket.emit('request-room');
+            skip() {
+                this.socket.emit('skip', this.roomId);
+                const v = document.getElementById('memeVideo');
+                v.style.display = 'block'; v.play();
+                v.onended = () => window.location.reload();
+            }
+            setupSocketEvents() {
                 this.socket.on('room-created', (d) => { this.roomId = d.roomId; this.startRTC(d); });
-                this.socket.on('chat', (m) => this.displayMsg("Partner: " + m));
                 this.socket.on('skip', () => window.location.reload());
-                this.socket.on('meme', (d) => this.displayMeme(d.emoji));
             }
             startRTC(d) {
                 this.pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
@@ -62,13 +66,8 @@
                 this.socket.on('answer', (d) => this.pc.setRemoteDescription(new RTCSessionDescription(d.sdp)));
                 this.socket.on('ice-candidate', (c) => this.pc.addIceCandidate(new RTCIceCandidate(c)));
             }
-            sendMeme(emoji) { this.socket.emit('meme', { roomId: this.roomId, emoji }); this.displayMeme(emoji); }
-            displayMeme(e) { const d = document.createElement('div'); d.innerText = e; d.className = 'meme-popup'; d.style.left = Math.random()*80 + 10 + '%'; d.style.top = '40%'; document.body.appendChild(d); setTimeout(() => d.remove(), 1500); }
-            displayMsg(m) { const d = document.createElement('div'); d.innerText = m; document.getElementById('messages').appendChild(d); }
-            skip() { this.socket.emit('skip', this.roomId); window.location.reload(); }
         }
-        const app = new BaatcheetApp();
-        document.getElementById('msgInput').onkeydown = (e) => { if(e.key === 'Enter') { app.socket.emit('chat', { roomId: app.roomId, message: e.target.value }); app.displayMsg("You: " + e.target.value); e.target.value = ''; } };
+        new BaatcheetApp();
     </script>
 </body>
 </html>
