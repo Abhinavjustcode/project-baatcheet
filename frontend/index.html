@@ -3,24 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baatcheet | Production Grade</title>
+    <title>Baatcheet | Pro Video Chat</title>
     <style>
-        /* BEM CSS Methodology */
+        /* BEM CSS Structure */
         :root { --dark: #000; --accent: #ff0055; }
-        body { margin: 0; background: var(--dark); color: white; font-family: sans-serif; overflow: hidden; }
+        body { margin: 0; background: var(--dark); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
 
         .app__container { display: grid; grid-template-columns: 1fr 1fr; height: 100vh; gap: 0; }
-        .video__box { position: relative; overflow: hidden; background: #111; }
+        .video__box { position: relative; overflow: hidden; background: #111; display: flex; align-items: center; justify-content: center; }
         .video__element { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 
         .controls__bar { 
             position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 15px; z-index: 10;
-            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
-            padding: 15px 30px; border-radius: 50px;
+            display: flex; gap: 12px; z-index: 100;
+            background: rgba(0,0,0,0.5); backdrop-filter: blur(15px);
+            padding: 12px 25px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.1);
         }
-        .btn { padding: 12px 25px; border-radius: 30px; border: none; cursor: pointer; font-weight: bold; }
-        .btn--skip { background: var(--accent); color: white; }
+        .btn { padding: 10px 20px; border-radius: 25px; border: none; cursor: pointer; font-weight: 600; transition: 0.3s; background: #222; color: white; }
+        .btn:hover { background: #333; }
+        .btn--skip { background: var(--accent); }
+
+        /* Meme Overlay */
+        .meme-popup { position: absolute; width: 150px; z-index: 500; pointer-events: none; animation: pop 1.5s ease-out forwards; }
+        @keyframes pop {
+            0% { transform: translateY(100px) scale(0); opacity: 0; }
+            50% { transform: translateY(-50px) scale(1.2); opacity: 1; }
+            100% { transform: translateY(-150px) scale(0.5); opacity: 0; }
+        }
     </style>
 </head>
 <body>
@@ -33,6 +42,8 @@
     <div class="controls__bar">
         <button class="btn" onclick="app.toggleMedia('video')">Cam</button>
         <button class="btn" onclick="app.toggleMedia('audio')">Mic</button>
+        <button class="btn" onclick="app.sendMeme('laugh')">😂</button>
+        <button class="btn" onclick="app.sendMeme('mindblown')">🤯</button>
         <button class="btn btn--skip" onclick="window.location.reload()">SKIP</button>
     </div>
 
@@ -76,13 +87,30 @@
 
                 this.socket.on('answer', (sdp) => this.pc.setRemoteDescription(new RTCSessionDescription(sdp)));
                 this.socket.on('ice-candidate', (c) => this.pc.addIceCandidate(new RTCIceCandidate(c)));
+                this.socket.on('meme', (data) => this.displayMeme(data.url));
+            }
+
+            sendMeme(type) {
+                const urls = { 
+                    laugh: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJqdWw5&ct=g/3o7TKMGpxxHOGTdzJC/giphy.gif',
+                    mindblown: 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJqdWw5&ct=g/3o7TKVun7iM8FMEU24/giphy.gif'
+                };
+                this.socket.emit('meme', { url: urls[type] });
+                this.displayMeme(urls[type]);
+            }
+
+            displayMeme(url) {
+                const img = document.createElement('img');
+                img.src = url; img.className = 'meme-popup';
+                img.style.left = Math.random() * 60 + 20 + '%';
+                document.body.appendChild(img);
+                setTimeout(() => img.remove(), 1500);
             }
 
             toggleMedia(kind) {
                 this.localStream.getTracks().forEach(t => { if(t.kind === kind) t.enabled = !t.enabled; });
             }
         }
-
         const app = new BaatcheetApp();
     </script>
 </body>
