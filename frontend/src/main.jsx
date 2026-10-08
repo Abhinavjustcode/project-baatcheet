@@ -1,0 +1,51 @@
+import React,{useEffect,useMemo,useRef,useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import './style.css';
+
+const SIGNALING=import.meta.env.VITE_SIGNALING_URL||'ws://localhost:8787';
+const ICE=[{urls:import.meta.env.VITE_STUN_URL||'stun:stun.l.google.com:19302'},...(import.meta.env.VITE_TURN_URL?[{urls:import.meta.env.VITE_TURN_URL,username:import.meta.env.VITE_TURN_USERNAME,credential:import.meta.env.VITE_TURN_CREDENTIAL}]:[])];
+const fmt=(ms)=>{const s=Math.max(0,Math.floor(ms/1000));return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`};
+const Icon=({children})=><span className="ico">{children}</span>;
+
+function App(){
+ const ws=useRef(null), pc=useRef(null), local=useRef(null), remote=useRef(null), reconnect=useRef(0), pingAt=useRef(0);
+ const [status,setStatus]=useState('offline'),[connected,setConnected]=useState(false),[callStart,setCallStart]=useState(null),[elapsed,setElapsed]=useState(0),[rtt,setRtt]=useState(null),[mic,setMic]=useState(true),[cam,setCam]=useState(true),[chatOpen,setChatOpen]=useState(false),[messages,setMessages]=useState([]),[draft,setDraft]=useState(''),[room,setRoom]=useState(''),[roomId,setRoomId]=useState(new URLSearchParams(location.search).get('room')||''),[created,setCreated]=useState(''),[toast,setToast]=useState(''),[queueing,setQueueing]=useState(false),[peerCountry]=useState('India');
+ const [online,setOnline]=useState(1);
+ const send=(m)=>{if(ws.current?.readyState===1) ws.current.send(JSON.stringify(m));};
+ const resetPeer=()=>{if(pc.current){pc.current.onicecandidate=null;pc.current.ontrack=null;pc.current.onconnectionstatechange=null;pc.current.close();pc.current=null;} if(remote.current) remote.current.srcObject=null; setConnected(false);setCallStart(null);setElapsed(0);};
+ const ensurePeer=(initiator)=>{
+   resetPeer(); const p=new RTCPeerConnection({iceServers:ICE}); pc.current=p;
+   if(local.current?.srcObject) for(const tr of local.current.srcObject.getTracks()) p.addTrack(tr,local.current.srcObject);
+   p.onicecandidate=e=>{if(e.candidate)send({type:'signal',data:{candidate:e.candidate}})};
+   p.ontrack=e=>{if(remote.current) remote.current.srcObject=e.streams[0]};
+   p.onconnectionstatechange=()=>{const s=p.connectionState;if(s==='connected'){setConnected(true);send({type:'call-ready'});} if(['failed','closed','disconnected'].includes(s)){setConnected(false);}};
+   if(initiator) p.createOffer().then(o=>p.setLocalDescription(o)).then(()=>send({type:'signal',data:{sdp:p.localDescription}}));
+ };
+ const startMedia=async()=>{if(local.current?.srcObject)return true;try{const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});local.current.srcObject=stream;return true}catch(e){setToast('Camera/microphone permission is required for video chat.');return false;}};
+ const connect=()=>{if(ws.current?.readyState===1)return;setStatus('connecting');const socket=new WebSocket(SIGNALING);ws.current=socket;socket.onopen=()=>{setStatus('online');if(roomId)send({type:'join-room',room:roomId});else send({type:'queue'});};socket.onmessage=async ev=>{const m=JSON.parse(ev.data);switch(m.type){case'waiting':setQueueing(true);break;case'room-created':setCreated(m.roomId);setRoomId(m.roomId);setQueueing(false);break;case'room-error':setToast(m.message);break;case'matched':setQueueing(false);setMessages([]);await startMedia();ensurePeer(m.initiator);break;case'signal':await onSignal(m.data);break;case'call-start':setCallStart(m.startedAt);setConnected(true);break;case'peer-left':resetPeer();setQueueing(true);setCallStart(null);send({type:'queue'});break;case'back-unavailable':setToast('Your previous person is no longer available.');break;case'chat':setMessages(x=>[...x,{from:'them',text:m.text}]);break;case'pong':setRtt(Date.now()-m.t);break;}};socket.onclose=()=>{setStatus('offline');setQueueing(false);resetPeer();if(reconnect.current<5){reconnect.current++;setTimeout(connect,1000*reconnect.current)}};};
+ const onSignal=async d=>{if(!pc.current) return;if(d.sdp){await pc.current.setRemoteDescription(d.sdp);if(d.sdp.type==='offer'){const ans=await pc.current.createAnswer();await pc.current.setLocalDescription(ans);send({type:'signal',data:{sdp:pc.current.localDescription}})}}else if(d.candidate){try{await pc.current.addIceCandidate(d.candidate)}catch{}}};
+ useEffect(()=>{connect();return()=>{ws.current?.close();resetPeer();local.current?.srcObject?.getTracks().forEach(t=>t.stop())}},[]);
+ useEffect(()=>{const t=setInterval(()=>{if(callStart)setElapsed(Date.now()-callStart);if(ws.current?.readyState===1){pingAt.current=Date.now();send({type:'ping',t:pingAt.current})}},1000);return()=>clearInterval(t)},[callStart]);
+ const toggleMic=()=>{const tr=local.current?.srcObject?.getAudioTracks()[0];if(tr){tr.enabled=!tr.enabled;setMic(tr.enabled)}};
+ const toggleCam=()=>{const tr=local.current?.srcObject?.getVideoTracks()[0];if(tr){tr.enabled=!tr.enabled;setCam(tr.enabled)}};
+ const skip=()=>{resetPeer();setQueueing(true);send({type:'skip'});};
+ const back=()=>send({type:'back'});
+ const createRoom=()=>{send({type:'create-room'});};
+ const joinRoom=()=>{if(room.trim())send({type:'join-room',room:room.trim()})};
+ const share=async()=>{const link=`${location.origin}/?room=${created}`;await navigator.clipboard?.writeText(link);setToast('Invite link copied.');};
+ const sendChat=()=>{if(draft.trim()){send({type:'chat',text:draft.trim()});setMessages(x=>[...x,{from:'me',text:draft.trim()}]);setDraft('')}};
+ return <div className="app">
+  <header className="topbar"><div className="brand"><div className="brandmark">♡</div><b>Baatcheet</b></div><nav><button className="nav active"><Icon>▣</Icon>Video Chat</button><button className="nav"><Icon>♟</Icon>Community</button><button className="nav"><Icon>ⓘ</Icon>About</button></nav><button className="premium">♛ &nbsp; Get Premium</button><div className="avatar">●</div></header>
+  <main className="layout">
+   <aside className="left"><div className="side active"><Icon>◈</Icon><div><b>Random Chat</b><small>Meet new people</small></div></div><div className="side"><Icon>◎</Icon><div><b>Global</b><small>Talk to anyone</small></div></div><div className="side"><Icon>♡</Icon><div><b>Favorites</b><small>People you liked</small></div></div><div className="side"><Icon>⚙</Icon><div><b>Settings</b><small>Camera, mic, etc.</small></div></div><div className="slogan">Real<br/>Conversations.<br/><span>Real People. 💜</span><i/></div><div className="footbrand">♧ Baatcheet<small>Connect · Chat · Be Real</small></div></aside>
+   <section className="center">
+    <div className="video-wrap"><video ref={remote} autoPlay playsInline className="remote"/><div className="video-empty">{queueing?<><div className="pulse"/><strong>Finding someone…</strong><span>Instant matchmaking is on</span></>:!connected?<><div className="pulse"/><strong>Connecting…</strong><span>Setting up a private call</span></>:null}</div><div className="connected-pill"><span className={connected?'green':'amber'}/>{connected?'Connected':'Waiting'} <em>|</em> {callStart?fmt(elapsed):'00:00'}</div><div className="country">🇮🇳 &nbsp;{peerCountry}</div><video ref={local} muted autoPlay playsInline className="self"/><button className="report" onClick={()=>send({type:'report'})}>⚑ &nbsp; Report</button><button className="full" onClick={()=>document.querySelector('.remote')?.requestFullscreen?.()}>⛶</button></div>
+    <div className="controls"><button onClick={toggleMic} className="control"><span>{mic?'🎙':'🔇'}</span><small>{mic?'Mute':'Unmute'}</small></button><button onClick={toggleCam} className="control"><span>{cam?'▣':'▧'}</span><small>{cam?'Stop Video':'Start Video'}</small></button><button onClick={skip} className="end"><span>☎</span><small>End</small></button><button className="control"><span>↻</span><small>Flip</small></button><button onClick={()=>setChatOpen(x=>!x)} className="control"><span>▤</span><small>Chat</small></button></div>
+   </section>
+   <aside className="right"><div className="card intro"><div className="cardicon">♧</div><div><b>{connected?'Talking to a new person':'Ready to meet someone'}</b><small>{connected?'Be respectful & have fun!':'Your next conversation is one click away.'}</small></div></div><div className="card info"><div className="row"><span>⌖</span><div><b>{peerCountry}</b><small>Region</small></div></div><div className="row"><span>♢</span><div><b>Safe & Secure</b><small>Your privacy matters</small></div></div>{rtt!=null&&<div className="latency">↯ {rtt} ms RTT</div>}</div><button className="action next" onClick={skip}><span>▮▶</span><div><b>Next</b><small>Find a new person</small></div><strong>›</strong></button><button className="action back" onClick={back}><span>◀◀</span><div><b>Back</b><small>Previous person</small></div><strong>›</strong></button><div className="card tip"><span>💡</span><div><b>Tip</b><p>Smile, be yourself, and have a great conversation!</p></div><button>×</button></div><div className="friends"><div><b>Invite a friend</b><small>Create a private room and share the link.</small></div><div className="friend-actions"><button onClick={createRoom}>Create Room</button>{created&&<button onClick={share}>Copy Link</button>}</div>{created&&<code>{location.origin}/?room={created}</code>}<div className="join"><input value={room} onChange={e=>setRoom(e.target.value.toUpperCase())} placeholder="ROOM CODE"/><button onClick={joinRoom}>Join</button></div></div></aside>
+  </main>
+  {chatOpen&&<div className="chat"><div className="chathead"><b>Chat</b><button onClick={()=>setChatOpen(false)}>×</button></div><div className="chatbody">{messages.length?messages.map((m,i)=><div key={i} className={m.from==='me'?'msg me':'msg'}>{m.text}</div>):<span className="muted">Say hello 👋</span>}</div><div className="chatinput"><input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendChat()} placeholder="Write a message…"/><button onClick={sendChat}>➤</button></div></div>}
+  {toast&&<button className="toast" onClick={()=>setToast('')}>{toast}</button>}
+ </div>
+}
+createRoot(document.getElementById('root')).render(<App/>);
